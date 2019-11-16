@@ -10,6 +10,12 @@
 #include <Debug.h>
 #include <Configuration.h>
 
+// Config
+#define DATA_PIN1 6
+#define DATA_PIN2 5
+#define NUM_LEDS 30
+#define LED_TYPE WS2812B
+
 // TODO: ADD OTA
 
 // Server
