@@ -114,7 +114,7 @@ void getSettingfunction()
   server.send(200, "application/json", response);
 }
 
-void handleInfoGet() 
+void handleInfoGet()
 {
   const size_t bufferSize = JSON_OBJECT_SIZE(11) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(14) + JSON_ARRAY_SIZE(2);
   StaticJsonDocument<bufferSize> abra;
@@ -218,7 +218,7 @@ void setSettingfunction()
   DEBUG_PRINTLN(F("HTTP Method: "));
   DEBUG_PRINTLN(server.method());
 
-  String effs = doc["Effect"].as<char*>();
+  String effs = doc["Effect"].as<char *>();
 
   // create an object
   String response;
@@ -351,7 +351,7 @@ void setEffectFunction()
   server.send(200, "application/plain", F("Success"));
 }
 
-void testFunction() 
+void testFunction()
 {
   server.send(200, F("application/plain"), F("Worked"));
 }
@@ -380,16 +380,16 @@ void setup()
   DEBUG_PRINTLN(F("IP address: "));
   DEBUG_PRINTLN(WiFi.localIP());
 
-  // TODO: Add Server
   server.on(F("/"), HTTP_GET, handleRoot);
   server.on(getEffect, HTTP_GET, getEffectfunction);
-  server.on(setEffect, HTTP_POST,setEffectFunction);
-  server.on(setSetting, HTTP_POST,setSettingfunction);
+  server.on(setEffect, HTTP_POST, setEffectFunction);
+  server.on(setSetting, HTTP_POST, setSettingfunction);
   server.on(getSetting, HTTP_POST, getSettingfunction);
   server.on(test, HTTP_GET, testFunction);
-  server.on(info2, HTTP_GET,handleInfoGet);
+  server.on(info2, HTTP_GET, handleInfoGet);
   server.onNotFound(handleNotFound);
   server.begin();
+
   DEBUG_PRINTLN(F("Server started"));
 
   // LEDs
