@@ -15,6 +15,5 @@ public:
         {
             leds[i] = CRGB::Black;
         }
-        FastLED.show();
     }
 };

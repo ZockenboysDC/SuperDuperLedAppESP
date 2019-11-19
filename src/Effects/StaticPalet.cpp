@@ -40,6 +40,5 @@ public:
             leds[i] = ColorFromPalette(myRedWhiteBluePalette_p, colorIndex, 64, LINEARBLEND);
             colorIndex += 3;
         }
-        FastLED.show();
     }
 };

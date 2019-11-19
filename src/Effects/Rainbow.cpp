@@ -37,7 +37,6 @@ public:
     {
         _hue += rate;
         fill_rainbow(&(leds[0]), NUM_LEDS, _hue, Hue);
-        FastLED.show();
     }
 
 protected:
