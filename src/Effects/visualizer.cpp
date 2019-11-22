@@ -6,8 +6,6 @@ class visualizer final : public Base_Class
 {
 
 public:
-
-
     visualizer(const char *name) : Base_Class(name){};
 
     CRGB Scroll(int pos)
@@ -76,11 +74,16 @@ public:
     void serialize(JsonObject &data) const override
     {
         data["Brightness"] = max_bright;
+        data["Decay"] = decay;
+        data["Wheel_speed"] = wheel_speed;
+        data["High"] = high;
     }
 
     void loop(CRGB leds[], int NUM_LEDS) override
     {
         int audio_input = analogRead(MIC_PIN); // ADD x2 HERE FOR MORE SENSITIVITY
+
+        delay(1);
 
         if (audio_input > 0)
         {
@@ -89,10 +92,11 @@ public:
             if (pre_react > react && pre_react <= NUM_LEDS) // ONLY ADJUST LEVEL OF LED IF LEVEL HIGHER THAN CURRENT LEVEL
                 react = pre_react;
 
-            // Serial.print(audio_input);
-            // Serial.print(" -> ");
-            // Serial.println(pre_react);
+            delay(1);
+
         }
+
+        delay(1);
 
         for (int i = NUM_LEDS; i >= 0; i--)
         {
@@ -106,6 +110,8 @@ public:
         if (k < 0)           // RESET COLOR WHEEL
             k = 255;
 
+        delay(1);
+
         // REMOVE LEDs
         decay_check++;
         if (decay_check > decay)
@@ -114,6 +120,7 @@ public:
             if (react > 0)
                 react--;
         }
+        delay(1);
     }
 
 protected:
@@ -129,5 +136,4 @@ protected:
     long pre_react = 0;  // NEW SPIKE CONVERSION
     long react = 30;     // NUMBER OF LEDs BEING LIT
     long post_react = 0; // OLD SPIKE CONVERSION
-
 };

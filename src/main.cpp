@@ -7,6 +7,7 @@
 #include <Effects/OFF.cpp>
 #include <Effects/StaticPalet.cpp>
 #include <Effects/visualizer.cpp>
+#include <Effects/Oldvisualizer.cpp>
 #include <Debug.h>
 #include <Configuration.h>
 
@@ -39,13 +40,15 @@ Base_Class *rainboweffect = new RainbowEffect("Rainbow");
 Base_Class *staticpalet = new StaticPalet("StaticPalet");
 Base_Class *off = new Off("off");
 Base_Class *visualiz = new visualizer("Visualizer");
+Base_Class *oldvisual = new Oldvisualizer("Oldvisualizer");
 
 enum EFFECTSENUM
 {
   RAINBOW,
   STATICPALET,
   OFF,
-  VISUALIZER
+  VISUALIZER,
+  OLDVISUALIZER
 };
 
 EFFECTSENUM currentEffect = VISUALIZER;
@@ -107,6 +110,14 @@ void getSettingfunction()
   {
     object["Effect"] = effs;
     visualiz->serialize(object);
+    response += doc.as<String>();
+    DEBUG_PRINTLN(response);
+    DEBUG_PRINTLN(doc.as<String>());
+  }
+  else if (effs == "Oldvisualizer")
+  {
+    object["Effect"] = effs;
+    oldvisual->serialize(object);
     response += doc.as<String>();
     DEBUG_PRINTLN(response);
     DEBUG_PRINTLN(doc.as<String>());
@@ -246,6 +257,12 @@ void setSettingfunction()
     response += doc.as<String>();
     DEBUG_PRINTLN(response);
   }
+  else if (effs == "Oldvisualizer")
+  {
+    oldvisual->deserialize(doc);
+    response += doc.as<String>();
+    DEBUG_PRINTLN(response);
+  }
   server.send(200, "application/json", response);
 }
 
@@ -303,6 +320,7 @@ void getEffectfunction()
 // Needs to be post
 void setEffectFunction()
 {
+  
   const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
   DynamicJsonDocument doc(capacity);
   String post_body = server.arg("plain");
@@ -347,7 +365,12 @@ void setEffectFunction()
     currentEffect = VISUALIZER;
     visualiz->begin();
   }
-
+  else if (effs == "Oldvisualizer")
+  {
+    currentEffect = OLDVISUALIZER;
+    oldvisual->begin();
+  }
+  
   server.send(200, "application/plain", F("Success"));
 }
 
@@ -361,6 +384,8 @@ void setup()
 #ifdef DEBUG
   Serial.begin(115200);
 #endif
+
+  delay( 3000 );
 
   // WIFI
   DEBUG_PRINTLN(F("Connecting to: "))
@@ -404,13 +429,14 @@ void loop()
 
   // WIFI
   if (!WiFi.status() == WL_CONNECTED)
-  {
+  { 
     DEBUG_PRINTLN(F("NO WIFI"));
   }
 
   //Server
   server.handleClient();
 
+  yield();
   switch (currentEffect)
   {
   case RAINBOW:
@@ -429,10 +455,13 @@ void loop()
     visualiz->loop(leds, NUM_LEDS);
     break;
 
+  case OLDVISUALIZER:
+    oldvisual->loop(leds, NUM_LEDS);
+    break;
+
   default:
     break;
   }
 
   FastLED.show();
-  delay(10);
 }
