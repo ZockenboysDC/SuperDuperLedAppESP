@@ -10,6 +10,7 @@
 #include <Effects/Oldvisualizer.cpp>
 #include <Debug.h>
 #include <Configuration.h>
+#include <ArduinoOTA.h>
 
 // Config
 #define DATA_PIN1 6
@@ -17,7 +18,9 @@
 #define NUM_LEDS 30
 #define LED_TYPE WS2812B
 
-// TODO: ADD OTA
+// OTA
+boolean ota_flag = false;
+uint16_t time_elapsed = 0;
 
 // Server
 const char *getEffect PROGMEM = "/get";
@@ -26,12 +29,8 @@ const char *getSetting PROGMEM = "/getSetting";
 const char *setSetting PROGMEM = "/setSetting";
 const char *test PROGMEM = "/test";
 const char *info2 PROGMEM = "/info";
+const char *update PROGMEM = "/update";
 ESP8266WebServer server(80);
-
-// Data buffer
-const size_t dataSize = 800;
-char data[dataSize];
-size_t dataLength = 0;
 
 // Strip
 #include <FastLED.h>
@@ -320,7 +319,7 @@ void getEffectfunction()
 // Needs to be post
 void setEffectFunction()
 {
-  
+
   const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
   DynamicJsonDocument doc(capacity);
   String post_body = server.arg("plain");
@@ -370,12 +369,20 @@ void setEffectFunction()
     currentEffect = OLDVISUALIZER;
     oldvisual->begin();
   }
-  
+
   server.send(200, "application/plain", F("Success"));
 }
 
 void testFunction()
 {
+  server.send(200, F("application/plain"), F("Worked"));
+}
+
+void updateFunction()
+{
+  delay(1);
+  ota_flag = true;
+  delay(1);
   server.send(200, F("application/plain"), F("Worked"));
 }
 
@@ -385,7 +392,7 @@ void setup()
   Serial.begin(115200);
 #endif
 
-  delay( 3000 );
+  delay(3000);
 
   // WIFI
   DEBUG_PRINTLN(F("Connecting to: "))
@@ -412,6 +419,7 @@ void setup()
   server.on(getSetting, HTTP_POST, getSettingfunction);
   server.on(test, HTTP_GET, testFunction);
   server.on(info2, HTTP_GET, handleInfoGet);
+  server.on(update, HTTP_GET, updateFunction);
   server.onNotFound(handleNotFound);
   server.begin();
 
@@ -420,21 +428,104 @@ void setup()
   // LEDs
   FastLED.addLeds<LED_TYPE, DATA_PIN1, GRB>(leds, NUM_LEDS);
   FastLED.addLeds<LED_TYPE, DATA_PIN2, GRB>(leds, NUM_LEDS);
-  FastLED.setBrightness(250);
+  FastLED.setBrightness(186);
+
+  ArduinoOTA.setPassword("123456");
+
+  ArduinoOTA.onStart([]() {
+    String type;
+    delay(1);
+    if (ArduinoOTA.getCommand() == U_FLASH)
+    {
+      type = "sketch";
+    }
+    else
+    {
+      type = "filesystem";
+    }
+
+    DEBUG_PRINTLN("Start updating " + type);
+    delay(1);
+  });
+
+  ArduinoOTA.onEnd([]() {
+    for (int i = 0; i <= 5; i++)
+    {
+      for (int i = 0; i <= NUM_LEDS; i++)
+      {
+        leds[i] = CRGB(200, 100, 255);
+      }
+      FastLED.show();
+      delay(100);
+      for (int i = 0; i <= NUM_LEDS; i++)
+      {
+        leds[i] = CRGB(0, 0, 0);
+      }
+      FastLED.show();
+      delay(100);
+    }
+    DEBUG_PRINTLN(F("\nEnd"));
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    DEBUG_PRINTF("Progress: %u%%\r", (progress / (total / 100)));
+    delay(1);
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    DEBUG_PRINTF("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR)
+    {
+      DEBUG_PRINTLN(F("Auth Failed"));
+    }
+    else if (error == OTA_BEGIN_ERROR)
+    {
+      DEBUG_PRINTLN(F("Begin Failed"));
+    }
+    else if (error == OTA_CONNECT_ERROR)
+    {
+      DEBUG_PRINTLN(F("Connect Failed"));
+    }
+    else if (error == OTA_RECEIVE_ERROR)
+    {
+      DEBUG_PRINTLN(F("Receive Failed"));
+    }
+    else if (error == OTA_END_ERROR)
+    {
+      DEBUG_PRINTLN(F("End Failed"));
+    }
+  });
+
+  ArduinoOTA.begin();
 }
 
 // Note: Add F() to Strings
 void loop()
 {
-
   // WIFI
   if (!WiFi.status() == WL_CONNECTED)
-  { 
+  {
     DEBUG_PRINTLN(F("NO WIFI"));
   }
 
+  delay(1);
   //Server
   server.handleClient();
+
+  delay(1);
+  if (ota_flag)
+  {
+    uint16_t time_start = millis();
+    while (time_elapsed < 30000)
+    {
+      DEBUG_PRINT(F("."));
+      ArduinoOTA.handle();
+      time_elapsed = millis() - time_start;
+      delay(10);
+    }
+    delay(100);
+    ESP.restart();
+  }
 
   yield();
   switch (currentEffect)
@@ -463,5 +554,6 @@ void loop()
     break;
   }
 
+  delay(1);
   FastLED.show();
 }

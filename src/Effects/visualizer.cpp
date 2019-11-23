@@ -34,7 +34,7 @@ public:
 
     void deserialize(DynamicJsonDocument &data) override
     {
-        delay(10);
+        delay(1);
         DEBUG_PRINTLN(data.as<String>() + "!");
         // max_bright
         if (data["Brightness"])
@@ -68,7 +68,7 @@ public:
             DEBUG_PRINTLN(data["Wheel_speed"].as<String>());
             wheel_speed = data["Wheel_speed"].as<int>();
         }
-        delay(10);
+        delay(1);
     }
 
     void serialize(JsonObject &data) const override
@@ -88,15 +88,13 @@ public:
         if (audio_input > 0)
         {
             pre_react = (((long)NUM_LEDS * (long)audio_input) / 1023L) * high; // TRANSLATE AUDIO LEVEL TO NUMBER OF LEDs
-
+            delay(1);
             if (pre_react > react && pre_react <= NUM_LEDS) // ONLY ADJUST LEVEL OF LED IF LEVEL HIGHER THAN CURRENT LEVEL
                 react = pre_react;
 
             delay(1);
 
         }
-
-        delay(1);
 
         for (int i = NUM_LEDS; i >= 0; i--)
         {
@@ -106,11 +104,11 @@ public:
                 leds[i] = CRGB(0, 0, 0);
         }
 
+        delay(1);
         k = k - wheel_speed; // SPEED OF COLOR WHEEL
         if (k < 0)           // RESET COLOR WHEEL
             k = 255;
 
-        delay(1);
 
         // REMOVE LEDs
         decay_check++;
