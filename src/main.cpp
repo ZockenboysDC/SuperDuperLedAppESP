@@ -10,7 +10,7 @@
 #include "effect.h"
 
 #include "effects/comet.cpp"
-#include "effects/beatwave.cpp"
+#include "effects/rainbow.cpp"
 
 // Config stuff
 struct Config
@@ -30,6 +30,7 @@ const char *filename = "config.json";
 Config config;
 String led(config.num_leds);
 const char *type = "Led_1";
+const char *version = "0.0.1";
 
 // TODO: ADD INFO SITE
 // Server / UDP
@@ -50,6 +51,7 @@ void set();
 void seton();
 void setoff();
 void getbon();
+void update();
 void setWiFi();
 void loadConfig(const char *filename, Config &config);
 void printFile(const char *filename);
@@ -58,6 +60,7 @@ void getSettings();
 void resetSettings();
 void setSettings();
 void v404();
+void getversion();
 void getStatus();
 void restart();
 void seteffectsetSetting();
@@ -66,7 +69,7 @@ void setup()
 {
     // AddtheFunction
     effectarray[0] = new comet("Comet");
-    effectarray[1] = new beatwave("Beatwave");
+    effectarray[1] = new Rainbow("Rainbow");
 
 #ifdef DEBUG
     Serial.begin(115200);
@@ -185,6 +188,8 @@ void setup()
     server.on("/getSettings", HTTP_GET, getSettings);
     server.on("/setSettings", HTTP_POST, setSettings);
     server.on("/getStatus", HTTP_GET, getStatus);
+    server.on("/update", HTTP_GET, update);
+    server.on("/getversion", HTTP_GET, getversion);
     server.on("/restart", HTTP_GET, restart);
     server.on("/reset", HTTP_POST, resetSettings);
     server.onNotFound(v404);
@@ -568,6 +573,7 @@ void getStatus()
     // create JSON
     JsonObject root = abra.to<JsonObject>();
     root["id"] = ESP.getChipId();
+    root["version"] = version;
     root["free_heap"] = ESP.getFreeHeap();
     root["sdk_version"] = ESP.getSdkVersion();
     root["boot_version"] = ESP.getBootVersion();
@@ -636,6 +642,14 @@ void getStatus()
     String response;
     response += abra.as<String>();
     server.send(200, "application/json", response);
+}
+
+void update() {
+    // TODO:
+}
+
+void getversion() {
+    server.send(200, "application/plain", version);
 }
 
 void restart()
