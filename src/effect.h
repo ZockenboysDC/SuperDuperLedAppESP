@@ -7,18 +7,20 @@
 class effect
 {
 public:
+    char name[20];
     const size_t jsonBufferSize = 0;
 
-    effect()
+    effect(const char *name)
     {
+        strncpy(this->name, name, 20);
     }
 
     virtual void begin()
     {
-        DEBUG_PRINTLN(F("effect: Beginning Effect"));
+        DEBUG_PRINTLN(F("BaseEffect: Beginning Effect"));
     }
 
     virtual void deserialize(JsonDocument &data) = 0;
-    virtual void getData(JsonObject &data) const = 0;
+    virtual void getData(JsonArray &data) const = 0;
     virtual void loop(CRGB leds[], int NUM_LEDS) = 0;
 };

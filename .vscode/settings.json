@@ -9,6 +9,7 @@
         "vector": "cpp",
         "initializer_list": "cpp",
         "random": "cpp",
-        "functional": "cpp"
+        "functional": "cpp",
+        "typeinfo": "cpp"
     }
 }

@@ -6,8 +6,11 @@
 #include "FS.h"
 #include "FastLED.h"
 #include "WiFiUdp.h"
+
 #include "effect.h"
-#include "effects/test.cpp"
+
+#include "effects/comet.cpp"
+#include "effects/beatwave.cpp"
 
 // Config stuff
 struct Config
@@ -18,7 +21,10 @@ struct Config
     int num_leds;
 };
 
-effect **base = new effect *[1];
+// makegreater
+effect **effectarray = new effect *[2];
+boolean bon = true;
+int currentEffect = 0;
 
 const char *filename = "config.json";
 Config config;
@@ -38,6 +44,12 @@ char packetBuffer[UDP_TX_PACKET_MAX_SIZE + 1];
 #define LED_TYPE WS2812B
 CRGB leds[MAX_NUM_LEDS];
 
+void getAllFunctions();
+void getsettingofFunction();
+void set();
+void seton();
+void setoff();
+void getbon();
 void setWiFi();
 void loadConfig(const char *filename, Config &config);
 void printFile(const char *filename);
@@ -46,30 +58,31 @@ void getSettings();
 void resetSettings();
 void setSettings();
 void v404();
+void getStatus();
+void restart();
+void seteffectsetSetting();
 
 void setup()
 {
-    // TODO: Add all Functions
-    base[0] = new test;
+    // AddtheFunction
+    effectarray[0] = new comet("Comet");
+    effectarray[1] = new beatwave("Beatwave");
 
 #ifdef DEBUG
     Serial.begin(115200);
 #endif
-
-    DEBUG_PRINTLN("Name:");
-    DEBUG_PRINTLN(base[0]->name);
 
     // init SPIFF and load config
     SPIFFS.begin();
     printFile(filename);
     loadConfig(filename, config);
 
+    // To allow for resets.
+    WiFi.disconnect();
+
     // LEDs
     FastLED.addLeds<LED_TYPE, DATA_PIN1, GRB>(leds, MAX_NUM_LEDS);
     FastLED.addLeds<LED_TYPE, DATA_PIN2, GRB>(leds, MAX_NUM_LEDS);
-
-    // TODO: REMOVE AFTER REALESE
-    WiFi.disconnect();
 
     // init WiFi
     WiFi.mode(WIFI_STA);
@@ -142,6 +155,13 @@ void setup()
         {
             delay(500);
             DEBUG_PRINT(F("."));
+            for (int i = 0; i < config.num_leds; i++)
+            {
+                if (i % 2 == 0)
+                    leds[i].setRGB(0, 255, 255);
+            }
+            FastLED.show();
+            fadeToBlackBy(leds, config.num_leds, 1);
         }
     }
 
@@ -155,8 +175,17 @@ void setup()
     DEBUG_PRINTLN(F("WiFi verbunden."));
 
     server.on("/setWiFi", HTTP_POST, setWiFi);
+    server.on("/set", HTTP_POST, set);
+    server.on("/getallFunctions", HTTP_GET, getAllFunctions);
+    server.on("/getsettingofFunction", HTTP_POST, getsettingofFunction);
+    server.on("/seteffectset", HTTP_POST, seteffectsetSetting);
+    server.on("/on", HTTP_GET, seton);
+    server.on("/off", HTTP_GET, setoff);
+    server.on("/getbon", HTTP_GET, getbon);
     server.on("/getSettings", HTTP_GET, getSettings);
     server.on("/setSettings", HTTP_POST, setSettings);
+    server.on("/getStatus", HTTP_GET, getStatus);
+    server.on("/restart", HTTP_GET, restart);
     server.on("/reset", HTTP_POST, resetSettings);
     server.onNotFound(v404);
 
@@ -176,38 +205,195 @@ void setup()
 
 void loop()
 {
-    // TODO: AND MAIN LED HANDLE
-    // UDP SEARCH
-    int packetSize = Udp.parsePacket();
-    if (packetSize)
+
+    if (bon)
     {
-        // TODO: REMOVE
-        DEBUG_PRINTF("Received packet of size %d from %s:%d\n    (to %s:%d, free heap = %d B)\n",
-                     packetSize,
-                     Udp.remoteIP().toString().c_str(), Udp.remotePort(),
-                     Udp.destinationIP().toString().c_str(), Udp.localPort(),
-                     ESP.getFreeHeap());
-
-        int n = Udp.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
-        packetBuffer[n] = 0;
-        DEBUG_PRINTLN(F("Inhalt: "));
-        DEBUG_PRINT(packetBuffer);
-
-        String name(config.name);
-        String typ(type);
-        String ReplyBuffer = name + "|" + WiFi.macAddress() + "|" + typ;
-        char cstr[ReplyBuffer.length() + 1];
-        strcpy(cstr, ReplyBuffer.c_str());
-        Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-        Udp.write(cstr);
-        Udp.endPacket();
+        effectarray[currentEffect]->loop(leds, config.num_leds);
     }
-    server.handleClient();
+    else
+    {
+        for (int i = 0; i < config.num_leds; i++)
+        {
+            leds[i] = CRGB::Black;
+        }
+    }
+
+    // Get the current time
+    unsigned long continueTime = millis() + int(float(1000 / 50));
+    // Do our main loop functions, until we hit our wait time
+
+    do
+    {
+        FastLED.show();
+        server.handleClient();
+        yield();
+
+        if (WiFi.status() != WL_CONNECTED)
+        {
+            DEBUG_PRINTLN(F("NO WIFI"));
+        }
+
+        // UDP SEARCH
+        int packetSize = Udp.parsePacket();
+        if (packetSize)
+        {
+            String name(config.name);
+            String typ(type);
+            String ReplyBuffer = name + "|" + WiFi.macAddress() + "|" + typ;
+            char cstr[ReplyBuffer.length() + 1];
+            strcpy(cstr, ReplyBuffer.c_str());
+            Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
+            Udp.write(cstr);
+            Udp.endPacket();
+        }
+
+    } while (millis() < continueTime);
+}
+
+void seteffectsetSetting()
+{
+    String data = server.arg("plain");
+    StaticJsonDocument<400> dataJson;
+
+    DeserializationError error = deserializeJson(dataJson, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    effectarray[dataJson["i"].as<int>()]->deserialize(dataJson);
+
+    server.send(200, "application/json", "OK");
+}
+
+void seton()
+{
+    if (bon == false)
+        bon = true;
+
+    server.send(200, "application/plain", "OK");
+}
+
+void setoff()
+{
+    if (bon == true)
+        bon = false;
+
+    server.send(200, "application/plain", "OK");
+}
+
+void getbon()
+{
+    server.send(200, "application/plain", bon + "");
+}
+
+void getAllFunctions()
+{
+    // {
+    //     "e" : [
+    //         {
+    //             "n" : "12345678912345678912",
+    //             "id" : "123"
+    //         },
+    //         {
+    //             "n" : "12345678912345678912",
+    //             "id" : "123"
+    //         },
+    //     ]
+    // }
+    int len = sizeof(effectarray) / sizeof(effectarray[0]);
+    const size_t capacity = JSON_ARRAY_SIZE(len + 1) + JSON_OBJECT_SIZE(1) + (len + 1) * JSON_OBJECT_SIZE(5);
+    DynamicJsonDocument doc(capacity);
+
+    JsonArray arra = doc.createNestedArray("e");
+
+    // getAllFunctionsGeneration
+    JsonObject e_0 = arra.createNestedObject();
+    e_0["n"] = effectarray[0]->name;
+    e_0["id"] = 0;
+
+    JsonObject e_1 = arra.createNestedObject();
+    e_1["n"] = effectarray[1]->name;
+    e_1["id"] = 1;
+
+    server.send(200, "application/json", doc.as<String>());
+}
+
+void getsettingofFunction()
+{
+    // {
+    //     "e": [
+    //         {
+    //             "n" : "Speed",
+    //             "t" : "i",
+    //             "mn": "1",
+    //             "mx": "15",
+    //             "v": "2",
+    //             "e" : "s"
+    //         },
+    //         {
+    //             "n" : "Speed",
+    //             "t" : "i",
+    //             "mn": "1",
+    //             "mx": "15",
+    //             "v": "2",
+    //             "e" : "s"
+    //         },
+    //     ]
+    // }
+
+    // {
+    //     "i": "0"
+    // }
+
+    String data = server.arg("plain");
+    StaticJsonDocument<30> dataJson;
+
+    DeserializationError error = deserializeJson(dataJson, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    const size_t capacity = JSON_ARRAY_SIZE(10) + JSON_OBJECT_SIZE(1) + (10) * JSON_OBJECT_SIZE(7);
+    DynamicJsonDocument doc(capacity);
+
+    JsonArray arra = doc.createNestedArray("e");
+
+    effectarray[dataJson["i"].as<int>()]->getData(arra);
+
+    DEBUG_PRINTLN("Sending");
+
+    server.send(200, "application/json", doc.as<String>());
+}
+
+void set()
+{
+    String data = server.arg("plain");
+    StaticJsonDocument<30> dataJson;
+
+    DeserializationError error = deserializeJson(dataJson, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    currentEffect = dataJson["i"].as<int>();
+    effectarray[currentEffect]->begin();
+
+    server.send(200, "application/plain", "OK");
 }
 
 void resetSettings()
 {
     SPIFFS.remove(filename);
+    server.send(200, "application/plain", "OK");
     delay(2000);
     ESP.restart();
 }
@@ -372,6 +558,91 @@ void getSettings()
     e_1["e"] = "n";
 
     server.send(200, "application/json", doc.as<String>());
+}
+
+void getStatus()
+{
+    const size_t bufferSize = JSON_OBJECT_SIZE(11) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(14) + JSON_ARRAY_SIZE(2);
+    StaticJsonDocument<bufferSize> abra;
+
+    // create JSON
+    JsonObject root = abra.to<JsonObject>();
+    root["id"] = ESP.getChipId();
+    root["free_heap"] = ESP.getFreeHeap();
+    root["sdk_version"] = ESP.getSdkVersion();
+    root["boot_version"] = ESP.getBootVersion();
+    root["boot_mode"] = ESP.getBootMode();
+    root["vcc"] = ESP.getVcc() / 1024.00;
+    root["cpu_freq"] = ESP.getCpuFreqMHz();
+    root["sketch_size"] = ESP.getSketchSize();
+    root["sketch_free_space"] = ESP.getFreeSketchSpace();
+
+    JsonObject flash_chip = root.createNestedObject("flash_chip");
+    flash_chip["id"] = ESP.getFlashChipId();
+    flash_chip["size"] = ESP.getFlashChipSize();
+    flash_chip["real_size"] = ESP.getFlashChipRealSize();
+    flash_chip["speed"] = ESP.getFlashChipSpeed();
+    FlashMode_t flashChipMode = ESP.getFlashChipMode();
+    if (flashChipMode == FM_QIO)
+        flash_chip["mode"] = "qio";
+    else if (flashChipMode == FM_QOUT)
+        flash_chip["mode"] = "qout";
+    else if (flashChipMode == FM_DIO)
+        flash_chip["mode"] = "dio";
+    else if (flashChipMode == FM_DOUT)
+        flash_chip["mode"] = "dout";
+    else if (flashChipMode == FM_UNKNOWN)
+        flash_chip["mode"] = "unknown";
+
+    JsonObject wifi = root.createNestedObject("wifi");
+    wifi["mac"] = WiFi.macAddress();
+    wifi["ssid"] = WiFi.SSID();
+    wifi["bssid"] = WiFi.BSSIDstr();
+    wifi["rssi"] = WiFi.RSSI();
+    wifi["channel"] = WiFi.channel();
+    WiFiMode_t wifiMode = WiFi.getMode();
+    if (wifiMode == WIFI_OFF)
+        wifi["mode"] = "off";
+    else if (wifiMode == WIFI_STA)
+        wifi["mode"] = "sta";
+    else if (wifiMode == WIFI_AP)
+        wifi["mode"] = "ap";
+    else if (wifiMode == WIFI_AP_STA)
+        wifi["mode"] = "ap_sta";
+    WiFiPhyMode_t wifiPhyMode = WiFi.getPhyMode();
+    if (wifiPhyMode == WIFI_PHY_MODE_11B)
+        wifi["phy_mode"] = "11b";
+    else if (wifiPhyMode == WIFI_PHY_MODE_11G)
+        wifi["phy_mode"] = "11g";
+    else if (wifiPhyMode == WIFI_PHY_MODE_11N)
+        wifi["phy_mode"] = "11n";
+    WiFiSleepType_t wifiSleepMode = WiFi.getSleepMode();
+    if (wifiSleepMode == WIFI_NONE_SLEEP)
+        wifi["sleep_mode"] = "none";
+    else if (wifiSleepMode == WIFI_LIGHT_SLEEP)
+        wifi["sleep_mode"] = "light";
+    else if (wifiSleepMode == WIFI_MODEM_SLEEP)
+        wifi["sleep_mode"] = "modem";
+    wifi["persistent"] = WiFi.getPersistent();
+    wifi["ip"] = WiFi.localIP().toString();
+    wifi["hostname"] = WiFi.hostname();
+    wifi["subnet_mask"] = WiFi.subnetMask().toString();
+    wifi["gateway_ip"] = WiFi.gatewayIP().toString();
+    JsonArray dns = wifi.createNestedArray("dns");
+    dns.add(WiFi.dnsIP(0).toString());
+    dns.add(WiFi.dnsIP(1).toString());
+
+    // send response
+    String response;
+    response += abra.as<String>();
+    server.send(200, "application/json", response);
+}
+
+void restart()
+{
+    server.send(200, "application/plain", "OK");
+    delay(100);
+    ESP.restart();
 }
 
 void v404()
