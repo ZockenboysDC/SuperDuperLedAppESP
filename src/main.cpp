@@ -30,7 +30,7 @@ const char *filename = "config.json";
 Config config;
 String led(config.num_leds);
 const char *type = "Led_1";
-const char *version = "0.0.1";
+const char *version = "0.0.2";
 
 // TODO: ADD INFO SITE
 // Server / UDP
