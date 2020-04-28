@@ -6,5 +6,6 @@
 </div>
 
 ---
-# This mans work is just amazing: https://github.com/atuline/FastLED-SoundReactive and its used here so keept that in min
+# This mans work is just amazing: https://github.com/atuline/FastLED-SoundReactive and its used here so keep that in mind
+### Currently I don't have the knowledg to do something like him so until i can all Sound Reactive Animations are from him
 # Maybe a Tutorial for a Installation will come some day.
