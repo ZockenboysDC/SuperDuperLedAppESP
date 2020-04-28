@@ -6,11 +6,13 @@
 #include "FS.h"
 #include "FastLED.h"
 #include "WiFiUdp.h"
+#include <ESP8266HTTPUpdateServer.h>
 
 #include "effect.h"
 
 #include "effects/comet.cpp"
 #include "effects/rainbow.cpp"
+#include "effects/ripple.cpp"
 
 // Config stuff
 struct Config
@@ -22,7 +24,7 @@ struct Config
 };
 
 // makegreater
-effect **effectarray = new effect *[2];
+effect **effectarray = new effect *[3];
 boolean bon = true;
 int currentEffect = 0;
 
@@ -31,10 +33,12 @@ Config config;
 String led(config.num_leds);
 const char *type = "Led_1";
 const char *version = "0.0.2";
+const char *versionURL = "https://7h3730b.github.io/SuperDuperLedAppESP/versions.json";
 
 // TODO: ADD INFO SITE
 // Server / UDP
 ESP8266WebServer server(80);
+ESP8266HTTPUpdateServer httpUpdater;
 WiFiUDP Udp;
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE + 1];
 
@@ -51,7 +55,6 @@ void set();
 void seton();
 void setoff();
 void getbon();
-void update();
 void setWiFi();
 void loadConfig(const char *filename, Config &config);
 void printFile(const char *filename);
@@ -60,6 +63,7 @@ void getSettings();
 void resetSettings();
 void setSettings();
 void v404();
+void getversionURL();
 void getversion();
 void getStatus();
 void restart();
@@ -70,6 +74,7 @@ void setup()
     // AddtheFunction
     effectarray[0] = new comet("Comet");
     effectarray[1] = new Rainbow("Rainbow");
+    effectarray[2] = new ripple("Ripple");
 
 #ifdef DEBUG
     Serial.begin(115200);
@@ -188,8 +193,8 @@ void setup()
     server.on("/getSettings", HTTP_GET, getSettings);
     server.on("/setSettings", HTTP_POST, setSettings);
     server.on("/getStatus", HTTP_GET, getStatus);
-    server.on("/update", HTTP_GET, update);
     server.on("/getversion", HTTP_GET, getversion);
+    server.on("/getversionURL", HTTP_GET, getversionURL);
     server.on("/restart", HTTP_GET, restart);
     server.on("/reset", HTTP_POST, resetSettings);
     server.onNotFound(v404);
@@ -198,6 +203,7 @@ void setup()
     DEBUG_PRINTLN(WiFi.localIP());
     DEBUG_PRINTLN(WiFi.SSID());
 
+    httpUpdater.setup(&server);
     server.begin();
 
     // INIT UDP SEARCH
@@ -322,6 +328,10 @@ void getAllFunctions()
     JsonObject e_1 = arra.createNestedObject();
     e_1["n"] = effectarray[1]->name;
     e_1["id"] = 1;
+
+    JsonObject e_2 = arra.createNestedObject();
+    e_2["n"] = effectarray[2]->name;
+    e_2["id"] = 2;
 
     server.send(200, "application/json", doc.as<String>());
 }
@@ -523,6 +533,11 @@ void printFile(const char *filename)
     file.close();
 }
 
+void getversionURL()
+{
+    server.send(200, "application/plain", versionURL);
+}
+
 void getSettings()
 {
     // {
@@ -644,11 +659,8 @@ void getStatus()
     server.send(200, "application/json", response);
 }
 
-void update() {
-    // TODO:
-}
-
-void getversion() {
+void getversion()
+{
     server.send(200, "application/plain", version);
 }
 
