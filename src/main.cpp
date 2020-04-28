@@ -32,7 +32,7 @@ const char *filename = "config.json";
 Config config;
 String led(config.num_leds);
 const char *type = "Led_1";
-const char *version = "0.0.2";
+const char *version = "0.1.0";
 const char *versionURL = "https://7h3730b.github.io/SuperDuperLedAppESP/versions.json";
 
 // TODO: ADD INFO SITE
