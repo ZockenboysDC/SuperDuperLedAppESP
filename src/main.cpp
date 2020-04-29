@@ -13,6 +13,9 @@
 #include "effects/comet.cpp"
 #include "effects/rainbow.cpp"
 #include "effects/ripple.cpp"
+#include "effects/Konfetti.cpp"
+#include "effects/sinelon.cpp"
+#include "effects/juggle.cpp"
 
 // Config stuff
 struct Config
@@ -24,7 +27,7 @@ struct Config
 };
 
 // makegreater
-effect **effectarray = new effect *[3];
+effect **effectarray = new effect *[5];
 boolean bon = true;
 int currentEffect = 0;
 
@@ -75,6 +78,9 @@ void setup()
     effectarray[0] = new comet("Comet");
     effectarray[1] = new Rainbow("Rainbow");
     effectarray[2] = new ripple("Ripple");
+    effectarray[3] = new Konfetti("Konfetti");
+    effectarray[4] = new sinelon("Sinelon");
+    effectarray[5] = new juggle("Juggle");
 
 #ifdef DEBUG
     Serial.begin(115200);
@@ -314,8 +320,9 @@ void getAllFunctions()
     //         },
     //     ]
     // }
-    int len = sizeof(effectarray) / sizeof(effectarray[0]);
-    const size_t capacity = JSON_ARRAY_SIZE(len + 1) + JSON_OBJECT_SIZE(1) + (len + 1) * JSON_OBJECT_SIZE(5);
+    int len = sizeof(effectarray) + 15;
+    const size_t capacity = JSON_ARRAY_SIZE(len + 1) + JSON_OBJECT_SIZE(1) + (len + 1) * JSON_OBJECT_SIZE(2);
+    DEBUG_PRINTLN(capacity);
     DynamicJsonDocument doc(capacity);
 
     JsonArray arra = doc.createNestedArray("e");
@@ -332,6 +339,18 @@ void getAllFunctions()
     JsonObject e_2 = arra.createNestedObject();
     e_2["n"] = effectarray[2]->name;
     e_2["id"] = 2;
+
+    JsonObject e_3 = arra.createNestedObject();
+    e_3["n"] = effectarray[3]->name;
+    e_3["id"] = 3;
+
+    JsonObject e_4 = arra.createNestedObject();
+    e_4["n"] = effectarray[4]->name;
+    e_4["id"] = 4;
+
+    JsonObject e_5 = arra.createNestedObject();
+    e_5["n"] = effectarray[5]->name;
+    e_5["id"] = 5;
 
     server.send(200, "application/json", doc.as<String>());
 }
