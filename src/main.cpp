@@ -1,438 +1,734 @@
-#include <Arduino.h>
-#include <ArduinoJson.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <Base_Class.h>
-#include <Effects/Rainbow.cpp>
-#include <Effects/OFF.cpp>
-#include <Effects/StaticPalet.cpp>
-#include <Effects/visualizer.cpp>
-#include <Debug.h>
-#include <Configuration.h>
+#include "Arduino.h"
+#include "Debug.h"
+#include "ESP8266WiFi.h"
+#include "ESP8266WebServer.h"
+#include "ArduinoJson.h"
+#include "FS.h"
+#include "FastLED.h"
+#include "WiFiUdp.h"
+#include <ESP8266HTTPUpdateServer.h>
 
-// Config
-#define DATA_PIN1 6
-#define DATA_PIN2 5
-#define NUM_LEDS 30
-#define LED_TYPE WS2812B
+#include "effect.h"
 
-// TODO: ADD OTA
+#include "effects/comet.cpp"
+#include "effects/rainbow.cpp"
+#include "effects/ripple.cpp"
+#include "effects/Konfetti.cpp"
+#include "effects/sinelon.cpp"
+#include "effects/juggle.cpp"
+#include "effects/theater.cpp"
+#include "effects/wave.cpp"
+#include "effects/pal.cpp"
+#include "effects/old.cpp"
 
-// Server
-const char *getEffect PROGMEM = "/get";
-const char *setEffect PROGMEM = "/set";
-const char *getSetting PROGMEM = "/getSetting";
-const char *setSetting PROGMEM = "/setSetting";
-const char *test PROGMEM = "/test";
-const char *info2 PROGMEM = "/info";
-ESP8266WebServer server(80);
-
-// Data buffer
-const size_t dataSize = 800;
-char data[dataSize];
-size_t dataLength = 0;
-
-// Strip
-#include <FastLED.h>
-CRGB leds[NUM_LEDS];
-Base_Class *rainboweffect = new RainbowEffect("Rainbow");
-Base_Class *staticpalet = new StaticPalet("StaticPalet");
-Base_Class *off = new Off("off");
-Base_Class *visualiz = new visualizer("Visualizer");
-
-enum EFFECTSENUM
+// Config stuff
+struct Config
 {
-  RAINBOW,
-  STATICPALET,
-  OFF,
-  VISUALIZER
+    char ssid[64];
+    char password[100];
+    char name[64];
+    int num_leds;
 };
 
-EFFECTSENUM currentEffect = VISUALIZER;
+// makegreater
+effect **effectarray = new effect *[9];
+boolean bon = true;
+int currentEffect = 0;
 
-void getSettingfunction()
-{
-  // {
-  //   "Effect": "Rainbow"
-  // }
-  const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
-  DynamicJsonDocument doc(capacity);
-  String post_body = server.arg("plain");
-  DEBUG_PRINTLN(post_body);
+const char *filename = "config.json";
+Config config;
+String led(config.num_leds);
+const char *type = "Led_1";
+const char *version = "0.1.2";
+const char *versionURL = "https://7h3730b.github.io/SuperDuperLedAppESP/versions.json";
 
-  DeserializationError error = deserializeJson(doc, post_body);
-  if (error)
-  {
-    DEBUG_PRINTLN(F("deserializeJson() failed: "));
-    DEBUG_PRINTLN(error.c_str());
-    return;
-  }
+// TODO: ADD INFO SITE
+// Server / UDP
+ESP8266WebServer server(80);
+ESP8266HTTPUpdateServer httpUpdater;
+WiFiUDP Udp;
+char packetBuffer[UDP_TX_PACKET_MAX_SIZE + 1];
 
-  DEBUG_PRINTLN(F("Response:"));
-  DEBUG_PRINTLN(doc["Effect"].as<char *>());
+// Led
+#define DATA_PIN1 6
+#define DATA_PIN2 5
+#define MAX_NUM_LEDS 500 // TODO: Lower this if you need more DATA Space
+#define LED_TYPE WS2812B
+CRGB leds[MAX_NUM_LEDS];
 
-  DEBUG_PRINTLN(F("HTTP Method: "));
-  DEBUG_PRINTLN(server.method());
-
-  String effs = doc["Effect"].as<char *>();
-
-  // create an object
-  JsonObject object = doc.to<JsonObject>();
-  String response;
-  if (effs == "Rainbow")
-  {
-    object["Effect"] = effs;
-    rainboweffect->serialize(object);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-    DEBUG_PRINTLN(doc.as<String>());
-  }
-  else if (effs == "StaticPalet")
-  {
-    object["Effect"] = effs;
-    staticpalet->serialize(object);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-    DEBUG_PRINTLN(doc.as<String>());
-  }
-  else if (effs == "OFF")
-  {
-    object["Effect"] = effs;
-    off->serialize(object);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-    DEBUG_PRINTLN(doc.as<String>());
-  }
-  else if (effs == "Visualizer")
-  {
-    object["Effect"] = effs;
-    visualiz->serialize(object);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-    DEBUG_PRINTLN(doc.as<String>());
-  }
-  server.send(200, "application/json", response);
-}
-
-void handleInfoGet() 
-{
-  const size_t bufferSize = JSON_OBJECT_SIZE(11) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(14) + JSON_ARRAY_SIZE(2);
-  StaticJsonDocument<bufferSize> abra;
-
-  // create JSON
-  JsonObject root = abra.to<JsonObject>();
-  root["id"] = ESP.getChipId();
-  root["free_heap"] = ESP.getFreeHeap();
-  root["sdk_version"] = ESP.getSdkVersion();
-  root["boot_version"] = ESP.getBootVersion();
-  root["boot_mode"] = ESP.getBootMode();
-  root["vcc"] = ESP.getVcc() / 1024.00;
-  root["cpu_freq"] = ESP.getCpuFreqMHz();
-  root["sketch_size"] = ESP.getSketchSize();
-  root["sketch_free_space"] = ESP.getFreeSketchSpace();
-
-  JsonObject flash_chip = root.createNestedObject("flash_chip");
-  flash_chip["id"] = ESP.getFlashChipId();
-  flash_chip["size"] = ESP.getFlashChipSize();
-  flash_chip["real_size"] = ESP.getFlashChipRealSize();
-  flash_chip["speed"] = ESP.getFlashChipSpeed();
-  FlashMode_t flashChipMode = ESP.getFlashChipMode();
-  if (flashChipMode == FM_QIO)
-    flash_chip["mode"] = "qio";
-  else if (flashChipMode == FM_QOUT)
-    flash_chip["mode"] = "qout";
-  else if (flashChipMode == FM_DIO)
-    flash_chip["mode"] = "dio";
-  else if (flashChipMode == FM_DOUT)
-    flash_chip["mode"] = "dout";
-  else if (flashChipMode == FM_UNKNOWN)
-    flash_chip["mode"] = "unknown";
-
-  JsonObject wifi = root.createNestedObject("wifi");
-  wifi["mac"] = WiFi.macAddress();
-  wifi["ssid"] = WiFi.SSID();
-  wifi["bssid"] = WiFi.BSSIDstr();
-  wifi["rssi"] = WiFi.RSSI();
-  wifi["channel"] = WiFi.channel();
-  WiFiMode_t wifiMode = WiFi.getMode();
-  if (wifiMode == WIFI_OFF)
-    wifi["mode"] = "off";
-  else if (wifiMode == WIFI_STA)
-    wifi["mode"] = "sta";
-  else if (wifiMode == WIFI_AP)
-    wifi["mode"] = "ap";
-  else if (wifiMode == WIFI_AP_STA)
-    wifi["mode"] = "ap_sta";
-  WiFiPhyMode_t wifiPhyMode = WiFi.getPhyMode();
-  if (wifiPhyMode == WIFI_PHY_MODE_11B)
-    wifi["phy_mode"] = "11b";
-  else if (wifiPhyMode == WIFI_PHY_MODE_11G)
-    wifi["phy_mode"] = "11g";
-  else if (wifiPhyMode == WIFI_PHY_MODE_11N)
-    wifi["phy_mode"] = "11n";
-  WiFiSleepType_t wifiSleepMode = WiFi.getSleepMode();
-  if (wifiSleepMode == WIFI_NONE_SLEEP)
-    wifi["sleep_mode"] = "none";
-  else if (wifiSleepMode == WIFI_LIGHT_SLEEP)
-    wifi["sleep_mode"] = "light";
-  else if (wifiSleepMode == WIFI_MODEM_SLEEP)
-    wifi["sleep_mode"] = "modem";
-  wifi["persistent"] = WiFi.getPersistent();
-  wifi["ip"] = WiFi.localIP().toString();
-  wifi["hostname"] = WiFi.hostname();
-  wifi["subnet_mask"] = WiFi.subnetMask().toString();
-  wifi["gateway_ip"] = WiFi.gatewayIP().toString();
-  JsonArray dns = wifi.createNestedArray("dns");
-  dns.add(WiFi.dnsIP(0).toString());
-  dns.add(WiFi.dnsIP(1).toString());
-
-  // send response
-  String response;
-  response += abra.as<String>();
-  server.send(200, "application/json", response);
-}
-
-void setSettingfunction()
-{
-  // {
-  //   "Effect": "Rainbow",
-  //   "hue": 2,
-  //   "rate": 1
-  // }
-  const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
-  DynamicJsonDocument doc(capacity);
-  String post_body = server.arg("plain");
-  DEBUG_PRINTLN(post_body);
-
-  DeserializationError error = deserializeJson(doc, post_body);
-  if (error)
-  {
-    DEBUG_PRINTLN(F("deserializeJson() failed: "));
-    DEBUG_PRINTLN(error.c_str());
-    return;
-  }
-
-  DEBUG_PRINTLN(F("Response:"));
-  DEBUG_PRINTLN(doc["Effect"].as<char *>());
-
-  DEBUG_PRINTLN(F("HTTP Method: "));
-  DEBUG_PRINTLN(server.method());
-
-  String effs = doc["Effect"].as<char*>();
-
-  // create an object
-  String response;
-  if (effs == "Rainbow")
-  {
-    rainboweffect->deserialize(doc);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-  }
-  else if (effs == "StaticPalet")
-  {
-    staticpalet->deserialize(doc);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-  }
-  else if (effs == "OFF")
-  {
-    off->deserialize(doc);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-  }
-  else if (effs == "Visualizer")
-  {
-    visualiz->deserialize(doc);
-    response += doc.as<String>();
-    DEBUG_PRINTLN(response);
-  }
-  server.send(200, "application/json", response);
-}
-
-void handleRoot()
-{
-  char temp[400];
-  int sec = millis() / 1000;
-  int min = sec / 60;
-  int hr = min / 60;
-
-  snprintf(temp, 400,
-
-           "<html>\
-  <head>\
-    <meta http-equiv='refresh' content='5'/>\
-    <title>ESP8266 LED Webserver for the App</title>\
-    <style>\
-      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-    </style>\
-  </head>\
-  <body>\
-    <h1>Hello from ESP8266!</h1>\
-    <p>Uptime: %02d:%02d:%02d</p>\
-  </body>\
-</html>",
-
-           hr, min % 60, sec % 60);
-  server.send(200, "text/html", temp);
-}
-
-void handleNotFound()
-{
-  String message = "False URL\n\n";
-  message += "URI: ";
-  message += server.uri();
-  message += "\nMethod: ";
-  message += (server.method() == HTTP_GET) ? "GET" : "POST";
-  message += "\nArguments: ";
-  message += server.args();
-  message += "\n";
-
-  for (uint8_t i = 0; i < server.args(); i++)
-  {
-    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
-  }
-
-  server.send(404, "text/plain", message);
-}
-
-void getEffectfunction()
-{
-  server.send(200, "application/plain", String(currentEffect));
-}
-
-// Needs to be post
-void setEffectFunction()
-{
-  const size_t capacity = JSON_OBJECT_SIZE(3) + JSON_ARRAY_SIZE(2) + 60;
-  DynamicJsonDocument doc(capacity);
-  String post_body = server.arg("plain");
-  DEBUG_PRINTLN(post_body);
-
-  DeserializationError error = deserializeJson(doc, post_body);
-  if (error)
-  {
-    DEBUG_PRINTLN(F("deserializeJson() failed: "));
-    DEBUG_PRINTLN(error.c_str());
-    return;
-  }
-
-  // {
-  //   "Effect": "Rainbow"
-  // }
-  DEBUG_PRINTLN(F("Response:"));
-  DEBUG_PRINTLN(doc["Effect"].as<char *>());
-
-  DEBUG_PRINTLN(F("HTTP Method: "));
-  DEBUG_PRINTLN(server.method());
-
-  String effs = doc["Effect"].as<String>();
-
-  if (effs == "Rainbow")
-  {
-    currentEffect = RAINBOW;
-    rainboweffect->begin();
-  }
-  else if (effs == "StaticPalet")
-  {
-    currentEffect = STATICPALET;
-    staticpalet->begin();
-  }
-  else if (effs == "OFF")
-  {
-    currentEffect = OFF;
-    off->begin();
-  }
-  else if (effs == "Visualizer")
-  {
-    currentEffect = VISUALIZER;
-    visualiz->begin();
-  }
-
-  server.send(200, "application/plain", F("Success"));
-}
-
-void testFunction() 
-{
-  server.send(200, F("application/plain"), F("Worked"));
-}
+void getAllFunctions();
+void getsettingofFunction();
+void set();
+void seton();
+void setoff();
+void getbon();
+void setWiFi();
+void loadConfig(const char *filename, Config &config);
+void printFile(const char *filename);
+void saveConf(const char *filename, const Config &config);
+void getSettings();
+void resetSettings();
+void setSettings();
+void v404();
+void getversionURL();
+void getversion();
+void getStatus();
+void restart();
+void seteffectsetSetting();
 
 void setup()
 {
+    // AddtheFunction
+    effectarray[0] = new ripple("Ripple");
+    effectarray[1] = new wave("Wave");
+    effectarray[2] = new pal("pal");
+    effectarray[3] = new old("old");
+    effectarray[4] = new juggle("Juggle");
+    effectarray[5] = new comet("Comet");
+    effectarray[6] = new Konfetti("Konfetti");
+    effectarray[7] = new sinelon("Sinelon");
+    effectarray[8] = new theater("theater");
+    effectarray[9] = new Rainbow("Rainbow");
+
 #ifdef DEBUG
-  Serial.begin(115200);
+    Serial.begin(115200);
 #endif
 
-  // WIFI
-  DEBUG_PRINTLN(F("Connecting to: "))
-  DEBUG_PRINTLN(ssid);
+    // init SPIFF and load config
+    SPIFFS.begin();
+    printFile(filename);
+    loadConfig(filename, config);
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+    // To allow for resets.
+    WiFi.disconnect();
 
-  while (WiFi.status() != WL_CONNECTED)
-  {
+    // LEDs
+    FastLED.addLeds<LED_TYPE, DATA_PIN1, GRB>(leds, MAX_NUM_LEDS);
+    FastLED.addLeds<LED_TYPE, DATA_PIN2, GRB>(leds, MAX_NUM_LEDS);
+
+    // init WiFi
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(config.ssid, config.password);
+
+    static long last_check;
+    static long last_check2;
+    static boolean black;
+    int c = 0;
+    bool smartconfi = false;
+    // WiFi check
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        if (millis() - last_check > 1500)
+        {
+            delay(0);
+            for (int i = 0; i < config.num_leds; i++)
+            {
+                if (i % 2 == 0)
+                    leds[i].setRGB(0, 255, 255);
+            }
+            FastLED.show();
+            last_check = millis();
+            ESP.wdtFeed();
+            last_check2 = millis();
+            black = true;
+        }
+        if (millis() - last_check2 > 500 && black)
+        {
+            fill_solid(leds, config.num_leds, CRGB::Black);
+            FastLED.show();
+            last_check2 = millis();
+            black = false;
+        }
+        c++;
+        // Falls nach 5 Sekunden kein WiFi => Smartconfig
+        if (c >= 35)
+        {
+            smartconfi = true;
+            break;
+        }
+    }
+
+    if (smartconfi)
+    {
+        // Smartconfig beginnt
+        WiFi.beginSmartConfig();
+
+        // Warten bis Smartconfig erhalten wird
+        DEBUG_PRINTLN(F("Warten auf Smartconfig"));
+        for (int i = 0; i < config.num_leds; i++)
+        {
+            if (i % 2 == 0)
+                leds[i].setRGB(0, 255, 255);
+        }
+        FastLED.show();
+        while (!WiFi.smartConfigDone())
+        {
+            delay(500);
+            DEBUG_PRINT(F("."));
+        }
+
+        // Falls fertig
+        DEBUG_PRINTLN(F("SmartConfig erhalten."));
+
+        // Warten auf WiFi
+        DEBUG_PRINTLN(F("Warten auf WiFi"));
+        while (WiFi.status() != WL_CONNECTED)
+        {
+            delay(500);
+            DEBUG_PRINT(F("."));
+            for (int i = 0; i < config.num_leds; i++)
+            {
+                if (i % 2 == 0)
+                    leds[i].setRGB(0, 255, 255);
+            }
+            FastLED.show();
+            fadeToBlackBy(leds, config.num_leds, 1);
+        }
+    }
+
+    for (int i = 0; i < config.num_leds; i++)
+    {
+        if (i % 2 == 0)
+            leds[i].setRGB(0, 255, 0);
+    }
+    FastLED.show();
+
+    DEBUG_PRINTLN(F("WiFi verbunden."));
+
+    server.on("/setWiFi", HTTP_POST, setWiFi);
+    server.on("/set", HTTP_POST, set);
+    server.on("/getallFunctions", HTTP_GET, getAllFunctions);
+    server.on("/getsettingofFunction", HTTP_POST, getsettingofFunction);
+    server.on("/seteffectset", HTTP_POST, seteffectsetSetting);
+    server.on("/on", HTTP_GET, seton);
+    server.on("/off", HTTP_GET, setoff);
+    server.on("/getbon", HTTP_GET, getbon);
+    server.on("/getSettings", HTTP_GET, getSettings);
+    server.on("/setSettings", HTTP_POST, setSettings);
+    server.on("/getStatus", HTTP_GET, getStatus);
+    server.on("/getversion", HTTP_GET, getversion);
+    server.on("/getversionURL", HTTP_GET, getversionURL);
+    server.on("/restart", HTTP_GET, restart);
+    server.on("/reset", HTTP_POST, resetSettings);
+    server.onNotFound(v404);
+
+    DEBUG_PRINT(F("IP Addresse: "));
+    DEBUG_PRINTLN(WiFi.localIP());
+    DEBUG_PRINTLN(WiFi.SSID());
+
+    httpUpdater.setup(&server);
+    server.begin();
+
+    // INIT UDP SEARCH
+    Udp.begin(8000);
+
     delay(500);
-    DEBUG_PRINT(F("."));
-  }
-
-  DEBUG_PRINTLN(F(""));
-  DEBUG_PRINTLN(F("WiFi connected"));
-  DEBUG_PRINTLN(F("IP address: "));
-  DEBUG_PRINTLN(WiFi.localIP());
-
-  // TODO: Add Server
-  server.on(F("/"), HTTP_GET, handleRoot);
-  server.on(getEffect, HTTP_GET, getEffectfunction);
-  server.on(setEffect, HTTP_POST,setEffectFunction);
-  server.on(setSetting, HTTP_POST,setSettingfunction);
-  server.on(getSetting, HTTP_POST, getSettingfunction);
-  server.on(test, HTTP_GET, testFunction);
-  server.on(info2, HTTP_GET,handleInfoGet);
-  server.onNotFound(handleNotFound);
-  server.begin();
-  DEBUG_PRINTLN(F("Server started"));
-
-  // LEDs
-  FastLED.addLeds<LED_TYPE, DATA_PIN1, GRB>(leds, NUM_LEDS);
-  FastLED.addLeds<LED_TYPE, DATA_PIN2, GRB>(leds, NUM_LEDS);
-  FastLED.setBrightness(250);
+    fill_solid(leds, MAX_NUM_LEDS, CRGB::Black);
+    FastLED.show();
 }
 
-// Note: Add F() to Strings
 void loop()
 {
 
-  // WIFI
-  if (!WiFi.status() == WL_CONNECTED)
-  {
-    DEBUG_PRINTLN(F("NO WIFI"));
-  }
+    if (bon)
+    {
+        effectarray[currentEffect]->loop(leds, config.num_leds);
+    }
+    else
+    {
+        for (int i = 0; i < config.num_leds; i++)
+        {
+            leds[i] = CRGB::Black;
+        }
+    }
 
-  //Server
-  server.handleClient();
+    // Get the current time
+    unsigned long continueTime = millis() + int(float(1000 / 50));
+    // Do our main loop functions, until we hit our wait time
 
-  switch (currentEffect)
-  {
-  case RAINBOW:
-    rainboweffect->loop(leds, NUM_LEDS);
-    break;
+    do
+    {
+        FastLED.show();
+        server.handleClient();
+        yield();
 
-  case STATICPALET:
-    staticpalet->loop(leds, NUM_LEDS);
-    break;
+        if (WiFi.status() != WL_CONNECTED)
+        {
+            DEBUG_PRINTLN(F("NO WIFI"));
+        }
 
-  case OFF:
-    off->loop(leds, NUM_LEDS);
-    break;
+        // UDP SEARCH
+        int packetSize = Udp.parsePacket();
+        if (packetSize)
+        {
+            String name(config.name);
+            String typ(type);
+            String ReplyBuffer = name + "|" + WiFi.macAddress() + "|" + typ;
+            char cstr[ReplyBuffer.length() + 1];
+            strcpy(cstr, ReplyBuffer.c_str());
+            Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
+            Udp.write(cstr);
+            Udp.endPacket();
+        }
 
-  case VISUALIZER:
-    visualiz->loop(leds, NUM_LEDS);
-    break;
+    } while (millis() < continueTime);
+}
 
-  default:
-    break;
-  }
+void seteffectsetSetting()
+{
+    String data = server.arg("plain");
+    StaticJsonDocument<400> dataJson;
 
-  FastLED.show();
-  delay(10);
+    DeserializationError error = deserializeJson(dataJson, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    effectarray[dataJson["i"].as<int>()]->deserialize(dataJson);
+
+    server.send(200, "application/json", "OK");
+}
+
+void seton()
+{
+    if (bon == false)
+        bon = true;
+
+    server.send(200, "application/plain", "OK");
+}
+
+void setoff()
+{
+    if (bon == true)
+        bon = false;
+
+    server.send(200, "application/plain", "OK");
+}
+
+void getbon()
+{
+    server.send(200, "application/plain", bon + "");
+}
+
+void getAllFunctions()
+{
+    // {
+    //     "e" : [
+    //         {
+    //             "n" : "12345678912345678912",
+    //             "id" : "123"
+    //         },
+    //         {
+    //             "n" : "12345678912345678912",
+    //             "id" : "123"
+    //         },
+    //     ]
+    // }
+    int len = sizeof(effectarray) + 15;
+    const size_t capacity = JSON_ARRAY_SIZE(len + 1) + JSON_OBJECT_SIZE(1) + (len + 1) * JSON_OBJECT_SIZE(2);
+    DEBUG_PRINTLN(capacity);
+    DynamicJsonDocument doc(capacity);
+
+    JsonArray arra = doc.createNestedArray("e");
+
+    // getAllFunctionsGeneration
+    JsonObject e_0 = arra.createNestedObject();
+    e_0["n"] = effectarray[0]->name;
+    e_0["id"] = 0;
+
+    JsonObject e_1 = arra.createNestedObject();
+    e_1["n"] = effectarray[1]->name;
+    e_1["id"] = 1;
+
+    JsonObject e_2 = arra.createNestedObject();
+    e_2["n"] = effectarray[2]->name;
+    e_2["id"] = 2;
+
+    JsonObject e_3 = arra.createNestedObject();
+    e_3["n"] = effectarray[3]->name;
+    e_3["id"] = 3;
+
+    JsonObject e_4 = arra.createNestedObject();
+    e_4["n"] = effectarray[4]->name;
+    e_4["id"] = 4;
+
+    JsonObject e_5 = arra.createNestedObject();
+    e_5["n"] = effectarray[5]->name;
+    e_5["id"] = 5;
+
+    JsonObject e_6 = arra.createNestedObject();
+    e_6["n"] = effectarray[6]->name;
+    e_6["id"] = 6;
+
+    JsonObject e_7 = arra.createNestedObject();
+    e_7["n"] = effectarray[7]->name;
+    e_7["id"] = 7;
+
+    JsonObject e_8 = arra.createNestedObject();
+    e_8["n"] = effectarray[8]->name;
+    e_8["id"] = 8;
+
+    JsonObject e_9 = arra.createNestedObject();
+    e_9["n"] = effectarray[9]->name;
+    e_9["id"] = 9;
+
+    server.send(200, "application/json", doc.as<String>());
+}
+
+void getsettingofFunction()
+{
+    // {
+    //     "e": [
+    //         {
+    //             "n" : "Speed",
+    //             "t" : "i",
+    //             "mn": "1",
+    //             "mx": "15",
+    //             "v": "2",
+    //             "e" : "s"
+    //         },
+    //         {
+    //             "n" : "Speed",
+    //             "t" : "i",
+    //             "mn": "1",
+    //             "mx": "15",
+    //             "v": "2",
+    //             "e" : "s"
+    //         },
+    //     ]
+    // }
+
+    // {
+    //     "i": "0"
+    // }
+
+    String data = server.arg("plain");
+    StaticJsonDocument<30> dataJson;
+
+    DeserializationError error = deserializeJson(dataJson, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    const size_t capacity = JSON_ARRAY_SIZE(30) + JSON_OBJECT_SIZE(1) + (10) * JSON_OBJECT_SIZE(7);
+    DynamicJsonDocument doc(capacity);
+
+    JsonArray arra = doc.createNestedArray("e");
+
+    effectarray[dataJson["i"].as<int>()]->getData(arra);
+
+    DEBUG_PRINTLN("Sending");
+
+    server.send(200, "application/json", doc.as<String>());
+}
+
+void set()
+{
+    String data = server.arg("plain");
+    StaticJsonDocument<30> dataJson;
+
+    DeserializationError error = deserializeJson(dataJson, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    currentEffect = dataJson["i"].as<int>();
+    effectarray[currentEffect]->begin();
+
+    server.send(200, "application/plain", "OK");
+}
+
+void resetSettings()
+{
+    SPIFFS.remove(filename);
+    server.send(200, "application/plain", "OK");
+    delay(2000);
+    ESP.restart();
+}
+
+// TODO: ADD CHECKS EVERYWHERE
+void setSettings()
+{
+    Config conf = Config();
+    String data = server.arg("plain");
+    StaticJsonDocument<500> doc;
+
+    DeserializationError error = deserializeJson(doc, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+
+    strlcpy(conf.name, doc["n"] | config.name, sizeof(conf.name));
+    conf.num_leds = doc["l"] | config.num_leds;
+    strlcpy(conf.password, config.password, sizeof(conf.password));
+    strlcpy(conf.ssid, config.ssid, sizeof(conf.ssid));
+    saveConf(filename, conf);
+    server.send(200, F("text/plain"), F("f"));
+    delay(2000);
+    ESP.restart();
+}
+
+void setWiFi()
+{
+    Config conf = Config();
+    String data = server.arg("plain");
+    StaticJsonDocument<500> doc;
+
+    DeserializationError error = deserializeJson(doc, data);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("deserializeJson() fehlgeschlagen: "));
+        DEBUG_PRINTLN(error.c_str());
+        return;
+    }
+    strlcpy(conf.name, type, sizeof(conf.name));
+    conf.num_leds = 30;
+    strlcpy(conf.password, doc["p"] | config.password, sizeof(conf.password));
+    strlcpy(conf.ssid, doc["w"] | config.ssid, sizeof(conf.ssid));
+    saveConf(filename, conf);
+    server.send(200, F("text/plain"), F("f"));
+    delay(2000);
+    ESP.restart();
+}
+
+void saveConf(const char *filename, const Config &config)
+{
+    SPIFFS.remove(filename);
+
+    // Datei öffnen zum schreiben
+    File file = SPIFFS.open(filename, "w");
+    if (!file)
+    {
+        DEBUG_PRINTLN(F("Failed to create file"));
+        return;
+    }
+
+    StaticJsonDocument<500> doc;
+
+    // Setze values des Dokuments
+    doc["w"] = config.ssid;
+    doc["p"] = config.password;
+    doc["l"] = config.num_leds;
+    doc["n"] = config.name;
+
+    // Serialize JSON zu Datei
+    if (serializeJson(doc, file) == 0)
+    {
+        DEBUG_PRINTLN(F("Failed to write to file"));
+    }
+
+    // Schließe die Datei
+    file.close();
+}
+
+void loadConfig(const char *filename, Config &config)
+{
+    File file = SPIFFS.open(filename, "r");
+    StaticJsonDocument<500> doc;
+
+    DeserializationError error = deserializeJson(doc, file);
+    if (error)
+    {
+        DEBUG_PRINTLN(F("Datei lesen fehlgeschlagen, nutze Standart Configuration"));
+        DEBUG_PRINTLN(error.c_str());
+    }
+
+    config.num_leds = doc["l"] | 30;
+    strlcpy(config.ssid, doc["w"] | "", sizeof(config.ssid));
+    strlcpy(config.password, doc["p"] | "", sizeof(config.password));
+    // TODO: Nutze ESP.getChipID
+    strlcpy(config.name, doc["n"] | type, sizeof(config.name));
+
+    file.close();
+}
+
+void printFile(const char *filename)
+{
+    // Datei öffnen zum lesen
+    File file = SPIFFS.open(filename, "r");
+    if (!file)
+    {
+        DEBUG_PRINTLN(F("Daten lesen fehlgeschlagen"));
+        return;
+    }
+
+    // Schreibe jeden Charakter einzeln
+    while (file.available())
+    {
+        DEBUG_PRINT((char)file.read());
+    }
+    DEBUG_PRINTLN();
+
+    // Schließe die Datei
+    file.close();
+}
+
+void getversionURL()
+{
+    server.send(200, "application/plain", versionURL);
+}
+
+void getSettings()
+{
+    // {
+    //     "e": [
+    //         {
+    //             "t": "i",
+    //             "mn": "1",
+    //             "mx": "999",
+    //             "n": "Led Anzahl",
+    //             "e":"l"
+    //         },
+    //         {
+    //             "t": "s",
+    //             "mn": "4",
+    //             "mx": "64",
+    //             "n": "Name",
+    //             "e":"n"
+    //         }
+    //     ]
+    // }
+    const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(1) + 2 * JSON_OBJECT_SIZE(5);
+    DynamicJsonDocument doc(capacity);
+
+    JsonArray e = doc.createNestedArray("e");
+
+    JsonObject e_0 = e.createNestedObject();
+    e_0["t"] = "i";
+    e_0["mn"] = "1";
+    e_0["mx"] = "999";
+    e_0["n"] = "Led Anzahl";
+    e_0["e"] = "l";
+
+    JsonObject e_1 = e.createNestedObject();
+    e_1["t"] = "s";
+    e_1["mn"] = "4";
+    e_1["mx"] = "64";
+    e_1["n"] = "Name";
+    e_1["e"] = "n";
+
+    server.send(200, "application/json", doc.as<String>());
+}
+
+void getStatus()
+{
+    const size_t bufferSize = JSON_OBJECT_SIZE(11) + JSON_OBJECT_SIZE(5) + JSON_OBJECT_SIZE(14) + JSON_ARRAY_SIZE(2);
+    StaticJsonDocument<bufferSize> abra;
+
+    // create JSON
+    JsonObject root = abra.to<JsonObject>();
+    root["id"] = ESP.getChipId();
+    root["version"] = version;
+    root["free_heap"] = ESP.getFreeHeap();
+    root["sdk_version"] = ESP.getSdkVersion();
+    root["boot_version"] = ESP.getBootVersion();
+    root["boot_mode"] = ESP.getBootMode();
+    root["vcc"] = ESP.getVcc() / 1024.00;
+    root["cpu_freq"] = ESP.getCpuFreqMHz();
+    root["sketch_size"] = ESP.getSketchSize();
+    root["sketch_free_space"] = ESP.getFreeSketchSpace();
+
+    JsonObject flash_chip = root.createNestedObject("flash_chip");
+    flash_chip["id"] = ESP.getFlashChipId();
+    flash_chip["size"] = ESP.getFlashChipSize();
+    flash_chip["real_size"] = ESP.getFlashChipRealSize();
+    flash_chip["speed"] = ESP.getFlashChipSpeed();
+    FlashMode_t flashChipMode = ESP.getFlashChipMode();
+    if (flashChipMode == FM_QIO)
+        flash_chip["mode"] = "qio";
+    else if (flashChipMode == FM_QOUT)
+        flash_chip["mode"] = "qout";
+    else if (flashChipMode == FM_DIO)
+        flash_chip["mode"] = "dio";
+    else if (flashChipMode == FM_DOUT)
+        flash_chip["mode"] = "dout";
+    else if (flashChipMode == FM_UNKNOWN)
+        flash_chip["mode"] = "unknown";
+
+    JsonObject wifi = root.createNestedObject("wifi");
+    wifi["mac"] = WiFi.macAddress();
+    wifi["ssid"] = WiFi.SSID();
+    wifi["bssid"] = WiFi.BSSIDstr();
+    wifi["rssi"] = WiFi.RSSI();
+    wifi["channel"] = WiFi.channel();
+    WiFiMode_t wifiMode = WiFi.getMode();
+    if (wifiMode == WIFI_OFF)
+        wifi["mode"] = "off";
+    else if (wifiMode == WIFI_STA)
+        wifi["mode"] = "sta";
+    else if (wifiMode == WIFI_AP)
+        wifi["mode"] = "ap";
+    else if (wifiMode == WIFI_AP_STA)
+        wifi["mode"] = "ap_sta";
+    WiFiPhyMode_t wifiPhyMode = WiFi.getPhyMode();
+    if (wifiPhyMode == WIFI_PHY_MODE_11B)
+        wifi["phy_mode"] = "11b";
+    else if (wifiPhyMode == WIFI_PHY_MODE_11G)
+        wifi["phy_mode"] = "11g";
+    else if (wifiPhyMode == WIFI_PHY_MODE_11N)
+        wifi["phy_mode"] = "11n";
+    WiFiSleepType_t wifiSleepMode = WiFi.getSleepMode();
+    if (wifiSleepMode == WIFI_NONE_SLEEP)
+        wifi["sleep_mode"] = "none";
+    else if (wifiSleepMode == WIFI_LIGHT_SLEEP)
+        wifi["sleep_mode"] = "light";
+    else if (wifiSleepMode == WIFI_MODEM_SLEEP)
+        wifi["sleep_mode"] = "modem";
+    wifi["persistent"] = WiFi.getPersistent();
+    wifi["ip"] = WiFi.localIP().toString();
+    wifi["hostname"] = WiFi.hostname();
+    wifi["subnet_mask"] = WiFi.subnetMask().toString();
+    wifi["gateway_ip"] = WiFi.gatewayIP().toString();
+    JsonArray dns = wifi.createNestedArray("dns");
+    dns.add(WiFi.dnsIP(0).toString());
+    dns.add(WiFi.dnsIP(1).toString());
+
+    // send response
+    String response;
+    response += abra.as<String>();
+    server.send(200, "application/json", response);
+}
+
+void getversion()
+{
+    server.send(200, "application/plain", version);
+}
+
+void restart()
+{
+    server.send(200, "application/plain", "OK");
+    delay(100);
+    ESP.restart();
+}
+
+void v404()
+{
+    String message = "False URL\n\n";
+    message += "URI: ";
+    message += server.uri();
+    message += "\nMethod: ";
+    message += (server.method() == HTTP_GET) ? "GET" : "POST";
+    message += "\nArguments: ";
+    message += server.args();
+    message += "\n";
+
+    for (uint8_t i = 0; i < server.args(); i++)
+    {
+        message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+    }
+
+    server.send(404, "text/plain", message);
 }

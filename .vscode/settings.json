@@ -8,6 +8,8 @@
         "list": "cpp",
         "vector": "cpp",
         "initializer_list": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "functional": "cpp",
+        "typeinfo": "cpp"
     }
 }
