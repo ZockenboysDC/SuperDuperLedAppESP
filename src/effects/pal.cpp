@@ -1,7 +1,8 @@
 #include <effect.h>
-#define MIC_PIN 0 // Analog port for microphone
 
-class ripple final : public effect
+#define MIC_PIN 0
+
+class pal final : public effect
 {
 private:
     uint8_t squelch = 7; // Anything below this is background noise, so we'll make it '0'.
@@ -11,50 +12,12 @@ private:
     uint8_t maxVol = 11; // Reasonable value for constant volume for 'peak detector', as it won't always trigger.
     bool samplePeak = 0; // Boolean flag for peak. Responding routine must reset this flag.
 
-    // Ripple variables
-    uint8_t colour;       // Ripple colour is randomized.
-    int center = 0;       // Center of the current ripple.
-    int step = -1;        // -1 is the initializing step.
-    uint8_t myfade = 255; // Starting brightness.
-#define maxsteps 16       // Case statement wouldn't allow a variable.
+    int sampleAgc, multAgc;
+    uint8_t targetAgc = 60;
 
-    void ripplef(CRGB leds[], int NUM_LEDS)
-    {
-
-        if (samplePeak == 1)
-        {
-            step = -1;
-            samplePeak = 0;
-        } // If we have a peak, let's reset our ripple.
-
-        fadeToBlackBy(leds, NUM_LEDS, 64); // 8 bit, 1 = slow, 255 = fast
-
-        switch (step)
-        {
-
-        case -1: // Initialize ripple variables.
-            center = random(NUM_LEDS);
-            colour = random8(); // More peaks/s = higher the hue colour.
-            step = 0;
-            break;
-
-        case 0:
-            leds[center] = CHSV(colour, 255, 255); // Display the first pixel of the ripple.
-            step++;
-            break;
-
-        case maxsteps: // At the end of the ripples.
-            // step = -1;
-            break;
-
-        default:                                                                                 // Middle of the ripples.
-            leds[(center + step + NUM_LEDS) % NUM_LEDS] += CHSV(colour, 255, myfade / step * 2); // Simple wrap.
-            leds[(center - step + NUM_LEDS) % NUM_LEDS] += CHSV(colour, 255, myfade / step * 2);
-            step++; // Next step.
-            break;
-        } // switch step
-
-    } // ripple()
+    CRGBPalette16 currentPalette;
+    CRGBPalette16 targetPalette;
+    TBlendType currentBlending = LINEARBLEND;
 
     void getSample()
     {
@@ -77,8 +40,28 @@ private:
 
     } // getSample()
 
+    void agcAvg()
+    {
+
+        multAgc = (sampleAvg < 1) ? targetAgc : targetAgc / sampleAvg;
+        sampleAgc = sample * multAgc;
+        if (sampleAgc > 255)
+            sampleAgc = 255;
+    }
+
+    void propPal(CRGB leds[], int NUM_LEDS)
+    {
+
+        leds[0] = ColorFromPalette(currentPalette, sampleAgc, sampleAgc, currentBlending);
+
+        for (int i = NUM_LEDS - 1; i > 0; i--)
+        { // Propagate up the strand.
+            leds[i] = leds[i - 1];
+        }
+    }
+
 public:
-    ripple(const char *name) : effect(name){};
+    pal(const char *name) : effect(name){};
 
     void deserialize(JsonDocument &data) override
     {
@@ -90,15 +73,30 @@ public:
 
     void begin()
     {
+        currentPalette = OceanColors_p;
+        targetPalette = OceanColors_p;
     }
 
     void loop(CRGB leds[], int NUM_LEDS) override
     {
-        getSample();
+        EVERY_N_SECONDS(5)
+        {                                       // Change the target palette to a random one every 5 seconds.
+            static uint8_t baseC = random8(32); // You can use this as a baseline colour if you want similar hues in the next line.
+            for (int i = 0; i < 16; i++)
+                targetPalette[i] = CHSV(random8() + baseC, 255, 255);
+        }
+
+        EVERY_N_MILLISECONDS(100)
+        {
+            uint8_t maxChanges = 24;
+            nblendPaletteTowardPalette(currentPalette, targetPalette, maxChanges); // AWESOME palette blending capability.
+        }
 
         EVERY_N_MILLISECONDS(20)
-        {
-            ripplef(leds, NUM_LEDS);
+        { // FastLED based non-blocking delay to update/display the sequence.
+            getSample();
+            agcAvg();
+            propPal(leds, NUM_LEDS);
         }
     }
 };

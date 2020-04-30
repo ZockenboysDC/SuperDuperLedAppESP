@@ -16,6 +16,10 @@
 #include "effects/Konfetti.cpp"
 #include "effects/sinelon.cpp"
 #include "effects/juggle.cpp"
+#include "effects/theater.cpp"
+#include "effects/wave.cpp"
+#include "effects/pal.cpp"
+#include "effects/old.cpp"
 
 // Config stuff
 struct Config
@@ -27,7 +31,7 @@ struct Config
 };
 
 // makegreater
-effect **effectarray = new effect *[5];
+effect **effectarray = new effect *[9];
 boolean bon = true;
 int currentEffect = 0;
 
@@ -35,7 +39,7 @@ const char *filename = "config.json";
 Config config;
 String led(config.num_leds);
 const char *type = "Led_1";
-const char *version = "0.1.0";
+const char *version = "0.1.2";
 const char *versionURL = "https://7h3730b.github.io/SuperDuperLedAppESP/versions.json";
 
 // TODO: ADD INFO SITE
@@ -75,12 +79,16 @@ void seteffectsetSetting();
 void setup()
 {
     // AddtheFunction
-    effectarray[0] = new comet("Comet");
-    effectarray[1] = new Rainbow("Rainbow");
-    effectarray[2] = new ripple("Ripple");
-    effectarray[3] = new Konfetti("Konfetti");
-    effectarray[4] = new sinelon("Sinelon");
-    effectarray[5] = new juggle("Juggle");
+    effectarray[0] = new ripple("Ripple");
+    effectarray[1] = new wave("Wave");
+    effectarray[2] = new pal("pal");
+    effectarray[3] = new old("old");
+    effectarray[4] = new juggle("Juggle");
+    effectarray[5] = new comet("Comet");
+    effectarray[6] = new Konfetti("Konfetti");
+    effectarray[7] = new sinelon("Sinelon");
+    effectarray[8] = new theater("theater");
+    effectarray[9] = new Rainbow("Rainbow");
 
 #ifdef DEBUG
     Serial.begin(115200);
@@ -352,6 +360,22 @@ void getAllFunctions()
     e_5["n"] = effectarray[5]->name;
     e_5["id"] = 5;
 
+    JsonObject e_6 = arra.createNestedObject();
+    e_6["n"] = effectarray[6]->name;
+    e_6["id"] = 6;
+
+    JsonObject e_7 = arra.createNestedObject();
+    e_7["n"] = effectarray[7]->name;
+    e_7["id"] = 7;
+
+    JsonObject e_8 = arra.createNestedObject();
+    e_8["n"] = effectarray[8]->name;
+    e_8["id"] = 8;
+
+    JsonObject e_9 = arra.createNestedObject();
+    e_9["n"] = effectarray[9]->name;
+    e_9["id"] = 9;
+
     server.send(200, "application/json", doc.as<String>());
 }
 
@@ -393,7 +417,7 @@ void getsettingofFunction()
         return;
     }
 
-    const size_t capacity = JSON_ARRAY_SIZE(10) + JSON_OBJECT_SIZE(1) + (10) * JSON_OBJECT_SIZE(7);
+    const size_t capacity = JSON_ARRAY_SIZE(30) + JSON_OBJECT_SIZE(1) + (10) * JSON_OBJECT_SIZE(7);
     DynamicJsonDocument doc(capacity);
 
     JsonArray arra = doc.createNestedArray("e");
